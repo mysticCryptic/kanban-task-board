@@ -1,4 +1,18 @@
 import { useMemo, useState } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+
+import type {
+  DragEndEvent,
+  DragStartEvent,
+} from "@dnd-kit/core";
 import "./App.css";
 
 type TaskStatus = "todo" | "in_progress" | "in_review" | "done";
@@ -13,12 +27,14 @@ type Task = {
   dueDate: string;
 };
 
-const columns: {
+type ColumnDefinition = {
   key: TaskStatus;
   title: string;
   emptyTitle: string;
   emptyText: string;
-}[] = [
+};
+
+const columns: ColumnDefinition[] = [
   {
     key: "todo",
     title: "To Do",
@@ -45,14 +61,125 @@ const columns: {
   },
 ];
 
+function TaskCard({
+  task,
+  isOverlay = false,
+}: {
+  task: Task;
+  isOverlay?: boolean;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    isDragging,
+  } = useDraggable({
+    id: task.id,
+    data: {
+      type: "task",
+      task,
+    },
+    disabled: isOverlay,
+  });
+
+  const style =
+    transform && !isOverlay
+      ? {
+          transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+        }
+      : undefined;
+
+  return (
+    <article
+      ref={setNodeRef}
+      style={style}
+      className={`task-card ${isDragging ? "task-card-dragging" : ""} ${
+        isOverlay ? "task-card-overlay" : ""
+      }`}
+      {...attributes}
+      {...listeners}
+    >
+      <div className="task-card-top">
+        <span className={`priority-badge priority-${task.priority}`}>
+          {task.priority}
+        </span>
+
+        <span className="drag-handle" aria-hidden="true">
+          ⠿
+        </span>
+      </div>
+
+      <h3>{task.title}</h3>
+
+      {task.description && <p>{task.description}</p>}
+
+      {task.dueDate && (
+        <div className="task-date">
+          Due{" "}
+          {new Date(`${task.dueDate}T00:00:00`).toLocaleDateString()}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function BoardColumn({
+  column,
+  tasks,
+}: {
+  column: ColumnDefinition;
+  tasks: Task[];
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: column.key,
+    data: {
+      type: "column",
+      status: column.key,
+    },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`column ${isOver ? "column-over" : ""}`}
+    >
+      <div className="column-header">
+        <h2>{column.title}</h2>
+        <span>{tasks.length}</span>
+      </div>
+
+      <div className="task-list">
+        {tasks.length === 0 ? (
+          <div className="empty-state">
+            <p>{column.emptyTitle}</p>
+            <span>{column.emptyText}</span>
+          </div>
+        ) : (
+          tasks.map((task) => <TaskCard task={task} key={task.id} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<Priority>("normal");
   const [dueDate, setDueDate] = useState("");
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 6,
+      },
+    }),
+  );
 
   const tasksByColumn = useMemo(() => {
     return columns.reduce<Record<TaskStatus, Task[]>>(
@@ -105,6 +232,37 @@ function App() {
     closeModal();
   }
 
+  function handleDragStart(event: DragStartEvent) {
+    const draggedTask = tasks.find((task) => task.id === event.active.id);
+    setActiveTask(draggedTask ?? null);
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    setActiveTask(null);
+
+    if (!over) {
+      return;
+    }
+
+    const destinationStatus = over.id as TaskStatus;
+    const validStatus = columns.some(
+      (column) => column.key === destinationStatus,
+    );
+
+    if (!validStatus) {
+      return;
+    }
+
+    setTasks((currentTasks) =>
+      currentTasks.map((task) =>
+        task.id === active.id
+          ? { ...task, status: destinationStatus }
+          : task,
+      ),
+    );
+  }
+
   return (
     <main className="app">
       <header className="app-header">
@@ -124,51 +282,26 @@ function App() {
         </button>
       </header>
 
-      <section className="board">
-        {columns.map((column) => {
-          const columnTasks = tasksByColumn[column.key];
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={() => setActiveTask(null)}
+      >
+        <section className="board">
+          {columns.map((column) => (
+            <BoardColumn
+              key={column.key}
+              column={column}
+              tasks={tasksByColumn[column.key]}
+            />
+          ))}
+        </section>
 
-          return (
-            <div className="column" key={column.key}>
-              <div className="column-header">
-                <h2>{column.title}</h2>
-                <span>{columnTasks.length}</span>
-              </div>
-
-              <div className="task-list">
-                {columnTasks.length === 0 ? (
-                  <div className="empty-state">
-                    <p>{column.emptyTitle}</p>
-                    <span>{column.emptyText}</span>
-                  </div>
-                ) : (
-                  columnTasks.map((task) => (
-                    <article className="task-card" key={task.id}>
-                      <div className="task-card-top">
-                        <span
-                          className={`priority-badge priority-${task.priority}`}
-                        >
-                          {task.priority}
-                        </span>
-                      </div>
-
-                      <h3>{task.title}</h3>
-
-                      {task.description && <p>{task.description}</p>}
-
-                      {task.dueDate && (
-                        <div className="task-date">
-                          Due {new Date(`${task.dueDate}T00:00:00`).toLocaleDateString()}
-                        </div>
-                      )}
-                    </article>
-                  ))
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </section>
+        <DragOverlay>
+          {activeTask ? <TaskCard task={activeTask} isOverlay /> : null}
+        </DragOverlay>
+      </DndContext>
 
       {isModalOpen && (
         <div className="modal-backdrop" onMouseDown={closeModal}>
