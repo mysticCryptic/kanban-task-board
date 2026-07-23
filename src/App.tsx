@@ -13,6 +13,7 @@ import type {
   DragEndEvent,
   DragStartEvent,
 } from "@dnd-kit/core";
+
 import "./App.css";
 
 type TaskStatus = "todo" | "in_progress" | "in_review" | "done";
@@ -127,9 +128,11 @@ function TaskCard({
 function BoardColumn({
   column,
   tasks,
+  isFiltering,
 }: {
   column: ColumnDefinition;
   tasks: Task[];
+  isFiltering: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.key,
@@ -152,8 +155,13 @@ function BoardColumn({
       <div className="task-list">
         {tasks.length === 0 ? (
           <div className="empty-state">
-            <p>{column.emptyTitle}</p>
-            <span>{column.emptyText}</span>
+            <p>{isFiltering ? "No matching tasks" : column.emptyTitle}</p>
+
+            <span>
+              {isFiltering
+                ? "Try changing your search or priority filter."
+                : column.emptyText}
+            </span>
           </div>
         ) : (
           tasks.map((task) => <TaskCard task={task} key={task.id} />)
@@ -173,6 +181,10 @@ function App() {
   const [priority, setPriority] = useState<Priority>("normal");
   const [dueDate, setDueDate] = useState("");
 
+  const [searchQuery, setSearchQuery] = useState("");
+  const [priorityFilter, setPriorityFilter] =
+    useState<Priority | "all">("all");
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -181,12 +193,29 @@ function App() {
     }),
   );
 
+  const filteredTasks = useMemo(() => {
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+
+    return tasks.filter((task) => {
+      const matchesSearch =
+        normalizedSearch === "" ||
+        task.title.toLowerCase().includes(normalizedSearch) ||
+        task.description.toLowerCase().includes(normalizedSearch);
+
+      const matchesPriority =
+        priorityFilter === "all" || task.priority === priorityFilter;
+
+      return matchesSearch && matchesPriority;
+    });
+  }, [tasks, searchQuery, priorityFilter]);
+
   const tasksByColumn = useMemo(() => {
     return columns.reduce<Record<TaskStatus, Task[]>>(
       (accumulator, column) => {
-        accumulator[column.key] = tasks.filter(
+        accumulator[column.key] = filteredTasks.filter(
           (task) => task.status === column.key,
         );
+
         return accumulator;
       },
       {
@@ -196,7 +225,7 @@ function App() {
         done: [],
       },
     );
-  }, [tasks]);
+  }, [filteredTasks]);
 
   function resetForm() {
     setTitle("");
@@ -246,6 +275,7 @@ function App() {
     }
 
     const destinationStatus = over.id as TaskStatus;
+
     const validStatus = columns.some(
       (column) => column.key === destinationStatus,
     );
@@ -262,6 +292,9 @@ function App() {
       ),
     );
   }
+
+  const isFiltering =
+    searchQuery.trim() !== "" || priorityFilter !== "all";
 
   return (
     <main className="app">
@@ -282,6 +315,67 @@ function App() {
         </button>
       </header>
 
+      <section className="board-toolbar" aria-label="Task filters">
+        <div className="search-field">
+          <span className="search-icon" aria-hidden="true">
+            ⌕
+          </span>
+
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search tasks..."
+            aria-label="Search tasks"
+          />
+
+          {searchQuery && (
+            <button
+              type="button"
+              className="clear-search-button"
+              onClick={() => setSearchQuery("")}
+              aria-label="Clear task search"
+            >
+              ×
+            </button>
+          )}
+        </div>
+
+        <label className="filter-field">
+          <span>Priority</span>
+
+          <select
+            value={priorityFilter}
+            onChange={(event) =>
+              setPriorityFilter(event.target.value as Priority | "all")
+            }
+          >
+            <option value="all">All priorities</option>
+            <option value="high">High</option>
+            <option value="normal">Normal</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+
+        <div className="filter-results">
+          Showing <strong>{filteredTasks.length}</strong> of{" "}
+          <strong>{tasks.length}</strong> tasks
+        </div>
+
+        {isFiltering && (
+          <button
+            type="button"
+            className="reset-filters-button"
+            onClick={() => {
+              setSearchQuery("");
+              setPriorityFilter("all");
+            }}
+          >
+            Reset filters
+          </button>
+        )}
+      </section>
+
       <DndContext
         sensors={sensors}
         onDragStart={handleDragStart}
@@ -294,6 +388,7 @@ function App() {
               key={column.key}
               column={column}
               tasks={tasksByColumn[column.key]}
+              isFiltering={isFiltering}
             />
           ))}
         </section>

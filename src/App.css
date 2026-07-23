@@ -404,3 +404,140 @@ select {
   background: rgba(244, 242, 255, 0.9);
   transform: translateY(-2px);
 }
+
+.board-toolbar {
+  max-width: 1500px;
+  margin: 0 auto 22px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e5e5ec;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 8px 24px rgba(30, 35, 90, 0.04);
+  backdrop-filter: blur(12px);
+}
+
+.search-field {
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+}
+
+.search-field input {
+  width: 100%;
+  height: 42px;
+  padding: 0 42px;
+  border: 1px solid #dedfe7;
+  border-radius: 11px;
+  background: #fafafd;
+  color: #20222a;
+  outline: none;
+}
+
+.search-field input:focus {
+  border-color: #7b70e9;
+  box-shadow: 0 0 0 3px rgba(98, 84, 231, 0.12);
+}
+
+.search-icon {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  color: #8a8d98;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.clear-search-button {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: #ececf2;
+  color: #60636e;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.filter-field {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #6f7280;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.filter-field select {
+  height: 42px;
+  padding: 0 36px 0 12px;
+  border: 1px solid #dedfe7;
+  border-radius: 11px;
+  background: #fafafd;
+  color: #30323a;
+  outline: none;
+  cursor: pointer;
+}
+
+.filter-field select:focus {
+  border-color: #7b70e9;
+  box-shadow: 0 0 0 3px rgba(98, 84, 231, 0.12);
+}
+
+.filter-results {
+  color: #818491;
+  font-size: 0.77rem;
+  white-space: nowrap;
+}
+
+.filter-results strong {
+  color: #464953;
+}
+
+.reset-filters-button {
+  border: 0;
+  padding: 8px 10px;
+  background: transparent;
+  color: #6254e7;
+  font-size: 0.77rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.reset-filters-button:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 800px) {
+  .board-toolbar {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .search-field {
+    flex-basis: 100%;
+  }
+
+  .filter-results {
+    display: flex;
+    align-items: center;
+  }
+}
+
+@media (max-width: 520px) {
+  .filter-field {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .filter-field select {
+    flex: 1;
+  }
+}
