@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "./lib/supabase";
 import {
   DndContext,
   DragOverlay,
@@ -26,6 +27,17 @@ type Task = {
   status: TaskStatus;
   priority: Priority;
   dueDate: string;
+};
+
+type DatabaseTask = {
+  id: string;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: Priority;
+  due_date: string | null;
+  user_id: string;
+  created_at: string;
 };
 
 type ColumnDefinition = {
@@ -103,9 +115,8 @@ function getDueDateStatus(task: Task) {
 
   if (differenceInDays <= 3) {
     return {
-      label: `Due in ${differenceInDays} day${
-        differenceInDays === 1 ? "" : "s"
-      }`,
+      label: `Due in ${differenceInDays} day${differenceInDays === 1 ? "" : "s"
+        }`,
       className: "due-soon",
     };
   }
@@ -141,8 +152,8 @@ function TaskCard({
   const style =
     transform && !isOverlay
       ? {
-          transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-        }
+        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+      }
       : undefined;
 
   const dueDateStatus = getDueDateStatus(task);
@@ -151,9 +162,8 @@ function TaskCard({
     <article
       ref={setNodeRef}
       style={style}
-      className={`task-card ${
-        isDragging ? "task-card-dragging" : ""
-      } ${isOverlay ? "task-card-overlay" : ""}`}
+      className={`task-card ${isDragging ? "task-card-dragging" : ""
+        } ${isOverlay ? "task-card-overlay" : ""}`}
       {...attributes}
       {...listeners}
     >
@@ -175,16 +185,15 @@ function TaskCard({
 
       {task.dueDate && (
         <div
-          className={`task-date ${
-            dueDateStatus?.className ?? "due-complete"
-          }`}
+          className={`task-date ${dueDateStatus?.className ?? "due-complete"
+            }`}
         >
           <span className="due-date-dot" />
 
           {task.status === "done"
             ? `Completed · Due ${new Date(
-                `${task.dueDate}T00:00:00`,
-              ).toLocaleDateString()}`
+              `${task.dueDate}T00:00:00`,
+            ).toLocaleDateString()}`
             : dueDateStatus?.label}
         </div>
       )}
@@ -244,8 +253,22 @@ function BoardColumn({
   );
 }
 
+function mapDatabaseTask(task: DatabaseTask): Task {
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description ?? "",
+    status: task.status,
+    priority: task.priority,
+    dueDate: task.due_date ?? "",
+  };
+}
+
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTask, setActiveTask] =
     useState<Task | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -259,6 +282,71 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] =
     useState<Priority | "all">("all");
+
+
+  useEffect(() => {
+    async function initializeApp() {
+      setIsLoading(true);
+      setErrorMessage(null);
+
+      try {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+
+        if (sessionError) {
+          throw sessionError;
+        }
+
+        let currentSession = session;
+
+        if (!currentSession) {
+          const {
+            data,
+            error: signInError,
+          } = await supabase.auth.signInAnonymously();
+
+          if (signInError) {
+            throw signInError;
+          }
+
+          currentSession = data.session;
+        }
+
+        if (!currentSession?.user) {
+          throw new Error("Unable to create a guest session.");
+        }
+
+        setUserId(currentSession.user.id);
+
+        const { data: taskRows, error: tasksError } =
+          await supabase
+            .from("tasks")
+            .select("*")
+            .order("created_at", { ascending: false });
+
+        if (tasksError) {
+          throw tasksError;
+        }
+
+        setTasks(
+          (taskRows as DatabaseTask[]).map(mapDatabaseTask),
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Something went wrong while loading the board.";
+
+        setErrorMessage(message);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    void initializeApp();
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -357,25 +445,40 @@ function App() {
     setIsModalOpen(false);
   }
 
-  function handleCreateTask(
+  async function handleCreateTask(
     event: React.FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault();
 
     const trimmedTitle = title.trim();
 
-    if (!trimmedTitle) {
+    if (!trimmedTitle || !userId) {
       return;
     }
 
-    const newTask: Task = {
-      id: crypto.randomUUID(),
-      title: trimmedTitle,
-      description: description.trim(),
-      status: "todo",
-      priority,
-      dueDate,
-    };
+    setErrorMessage(null);
+
+    const { data, error } = await supabase
+      .from("tasks")
+      .insert({
+        title: trimmedTitle,
+        description: description.trim() || null,
+        status: "todo",
+        priority,
+        due_date: dueDate || null,
+        user_id: userId,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    const newTask = mapDatabaseTask(
+      data as DatabaseTask,
+    );
 
     setTasks((currentTasks) => [
       newTask,
@@ -393,7 +496,7 @@ function App() {
     setActiveTask(draggedTask ?? null);
   }
 
-  function handleDragEnd(event: DragEndEvent) {
+  async function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
 
     setActiveTask(null);
@@ -412,16 +515,53 @@ function App() {
       return;
     }
 
+    const currentTask = tasks.find(
+      (task) => task.id === active.id,
+    );
+
+    if (
+      !currentTask ||
+      currentTask.status === destinationStatus
+    ) {
+      return;
+    }
+
+    const previousStatus = currentTask.status;
+
     setTasks((currentTasks) =>
       currentTasks.map((task) =>
         task.id === active.id
           ? {
-              ...task,
-              status: destinationStatus,
-            }
+            ...task,
+            status: destinationStatus,
+          }
           : task,
       ),
     );
+
+    const { error } = await supabase
+      .from("tasks")
+      .update({
+        status: destinationStatus,
+      })
+      .eq("id", active.id);
+
+    if (error) {
+      setTasks((currentTasks) =>
+        currentTasks.map((task) =>
+          task.id === active.id
+            ? {
+              ...task,
+              status: previousStatus,
+            }
+            : task,
+        ),
+      );
+
+      setErrorMessage(
+        "The task could not be moved. Please try again.",
+      );
+    }
   }
 
   const isFiltering =
@@ -450,6 +590,28 @@ function App() {
           + New task
         </button>
       </header>
+
+      {errorMessage && (
+  <div className="error-banner" role="alert">
+    <span>{errorMessage}</span>
+
+    <button
+      type="button"
+      onClick={() => setErrorMessage(null)}
+      aria-label="Dismiss error"
+    >
+      ×
+    </button>
+  </div>
+)}
+
+{isLoading ? (
+  <section className="loading-state">
+    <div className="loading-spinner" />
+    <p>Preparing your workspace...</p>
+  </section>
+) : (
+  <>
 
       <section
         className="stats-grid"
@@ -483,11 +645,10 @@ function App() {
         </article>
 
         <article
-          className={`stat-card ${
-            boardStats.overdue > 0
-              ? "stat-card-warning"
-              : ""
-          }`}
+          className={`stat-card ${boardStats.overdue > 0
+            ? "stat-card-warning"
+            : ""
+            }`}
         >
           <div>
             <p>Overdue</p>
@@ -573,8 +734,8 @@ function App() {
             onChange={(event) =>
               setPriorityFilter(
                 event.target.value as
-                  | Priority
-                  | "all",
+                | Priority
+                | "all",
               )
             }
           >
@@ -633,6 +794,9 @@ function App() {
           ) : null}
         </DragOverlay>
       </DndContext>
+
+        </>
+)}
 
       {isModalOpen && (
         <div
