@@ -541,3 +541,170 @@ select {
     flex: 1;
   }
 }
+
+.stats-grid {
+  max-width: 1500px;
+  margin: 0 auto 20px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr)) minmax(260px, 2fr);
+  gap: 12px;
+}
+
+.stat-card,
+.progress-card {
+  border: 1px solid #e5e5ec;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 8px 24px rgba(30, 35, 90, 0.04);
+  backdrop-filter: blur(12px);
+}
+
+.stat-card {
+  min-height: 95px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 17px;
+}
+
+.stat-card p,
+.progress-card p {
+  margin: 0 0 6px;
+  color: #818491;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.stat-card strong {
+  color: #282a33;
+  font-size: 1.55rem;
+}
+
+.stat-icon {
+  display: grid;
+  width: 35px;
+  height: 35px;
+  place-items: center;
+  border-radius: 10px;
+  background: #f0effc;
+  color: #6254e7;
+  font-weight: 850;
+}
+
+.stat-card-warning {
+  border-color: #f0c7c2;
+  background: #fff8f7;
+}
+
+.stat-card-warning .stat-icon {
+  background: #ffe7e4;
+  color: #c34b41;
+}
+
+.progress-card {
+  padding: 17px;
+}
+
+.progress-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 15px;
+}
+
+.progress-header strong {
+  font-size: 1.35rem;
+}
+
+.progress-header span {
+  color: #858895;
+  font-size: 0.72rem;
+}
+
+.progress-track {
+  height: 8px;
+  margin-top: 15px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e9e8f0;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6254e7, #887cf0);
+  transition: width 250ms ease;
+}
+
+.task-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  padding: 6px 9px;
+  border-radius: 8px;
+}
+
+.due-date-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.due-normal {
+  background: #f1f1f5;
+  color: #707480;
+}
+
+.due-soon {
+  background: #fff6df;
+  color: #a06b00;
+}
+
+.due-today {
+  background: #fff0dc;
+  color: #b75e00;
+}
+
+.due-overdue {
+  background: #ffebe8;
+  color: #c23e34;
+  font-weight: 750;
+}
+
+.due-complete {
+  background: #eaf7ee;
+  color: #2f7d4d;
+}
+
+@media (max-width: 1100px) {
+  .stats-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .progress-card {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 700px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .progress-card {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 420px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .progress-card {
+    grid-column: auto;
+  }
+}
