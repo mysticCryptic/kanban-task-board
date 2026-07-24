@@ -38,6 +38,21 @@ type DatabaseTask = {
   created_at: string;
 };
 
+type Comment = {
+  id: string;
+  taskId: string;
+  body: string;
+  createdAt: string;
+};
+
+type DatabaseComment = {
+  id: string;
+  task_id: string;
+  user_id: string;
+  body: string;
+  created_at: string;
+};
+
 type ColumnDefinition = {
   key: TaskStatus;
   title: string;
@@ -113,8 +128,9 @@ function getDueDateStatus(task: Task) {
 
   if (differenceInDays <= 3) {
     return {
-      label: `Due in ${differenceInDays} day${differenceInDays === 1 ? "" : "s"
-        }`,
+      label: `Due in ${differenceInDays} day${
+        differenceInDays === 1 ? "" : "s"
+      }`,
       className: "due-soon",
     };
   }
@@ -125,15 +141,39 @@ function getDueDateStatus(task: Task) {
   };
 }
 
+function mapDatabaseTask(task: DatabaseTask): Task {
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description ?? "",
+    status: task.status,
+    priority: task.priority,
+    dueDate: task.due_date ?? "",
+  };
+}
+
+function mapDatabaseComment(comment: DatabaseComment): Comment {
+  return {
+    id: comment.id,
+    taskId: comment.task_id,
+    body: comment.body,
+    createdAt: comment.created_at,
+  };
+}
+
 function TaskCard({
   task,
   isOverlay = false,
   onDelete,
+  onEdit,
+  onOpenComments,
   isDeleting = false,
 }: {
   task: Task;
   isOverlay?: boolean;
   onDelete?: (task: Task) => void;
+  onEdit?: (task: Task) => void;
+  onOpenComments?: (task: Task) => void;
   isDeleting?: boolean;
 }) {
   const {
@@ -154,8 +194,8 @@ function TaskCard({
   const style =
     transform && !isOverlay
       ? {
-        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-      }
+          transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+        }
       : undefined;
 
   const dueDateStatus = getDueDateStatus(task);
@@ -164,9 +204,11 @@ function TaskCard({
     <article
       ref={setNodeRef}
       style={style}
-      className={`task-card ${isDragging ? "task-card-dragging" : ""
-        } ${isOverlay ? "task-card-overlay" : ""} ${isDeleting ? "task-card-deleting" : ""
-        }`}
+      className={`task-card ${
+        isDragging ? "task-card-dragging" : ""
+      } ${isOverlay ? "task-card-overlay" : ""} ${
+        isDeleting ? "task-card-deleting" : ""
+      }`}
     >
       <div className="task-card-top">
         <span className={`priority-badge priority-${task.priority}`}>
@@ -174,6 +216,32 @@ function TaskCard({
         </span>
 
         <div className="task-card-actions">
+          {!isOverlay && onOpenComments && (
+            <button
+              type="button"
+              className="task-icon-button"
+              disabled={isDeleting}
+              onClick={() => onOpenComments(task)}
+              aria-label={`Open comments for ${task.title}`}
+              title="Comments"
+            >
+              ◌
+            </button>
+          )}
+
+          {!isOverlay && onEdit && (
+            <button
+              type="button"
+              className="task-icon-button"
+              disabled={isDeleting}
+              onClick={() => onEdit(task)}
+              aria-label={`Edit ${task.title}`}
+              title="Edit task"
+            >
+              ✎
+            </button>
+          )}
+
           {!isOverlay && onDelete && (
             <button
               type="button"
@@ -207,15 +275,16 @@ function TaskCard({
 
       {task.dueDate && (
         <div
-          className={`task-date ${dueDateStatus?.className ?? "due-complete"
-            }`}
+          className={`task-date ${
+            dueDateStatus?.className ?? "due-complete"
+          }`}
         >
           <span className="due-date-dot" />
 
           {task.status === "done"
             ? `Completed · Due ${new Date(
-              `${task.dueDate}T00:00:00`,
-            ).toLocaleDateString()}`
+                `${task.dueDate}T00:00:00`,
+              ).toLocaleDateString()}`
             : dueDateStatus?.label}
         </div>
       )}
@@ -228,12 +297,16 @@ function BoardColumn({
   tasks,
   isFiltering,
   onDeleteTask,
+  onEditTask,
+  onOpenComments,
   deletingTaskIds,
 }: {
   column: ColumnDefinition;
   tasks: Task[];
   isFiltering: boolean;
   onDeleteTask: (task: Task) => void;
+  onEditTask: (task: Task) => void;
+  onOpenComments: (task: Task) => void;
   deletingTaskIds: Set<string>;
 }) {
   const { setNodeRef, isOver } = useDroppable({
@@ -275,6 +348,8 @@ function BoardColumn({
               key={task.id}
               task={task}
               onDelete={onDeleteTask}
+              onEdit={onEditTask}
+              onOpenComments={onOpenComments}
               isDeleting={deletingTaskIds.has(task.id)}
             />
           ))
@@ -284,31 +359,30 @@ function BoardColumn({
   );
 }
 
-function mapDatabaseTask(task: DatabaseTask): Task {
-  return {
-    id: task.id,
-    title: task.title,
-    description: task.description ?? "",
-    status: task.status,
-    priority: task.priority,
-    dueDate: task.due_date ?? "",
-  };
-}
-
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [isSavingTask, setIsSavingTask] = useState(false);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<Priority>("normal");
   const [dueDate, setDueDate] = useState("");
+
   const [deletingTaskIds, setDeletingTaskIds] =
     useState<Set<string>>(new Set());
+
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [commentBody, setCommentBody] = useState("");
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
+  const [isSavingComment, setIsSavingComment] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] =
@@ -463,19 +537,38 @@ function App() {
     };
   }, [tasks]);
 
-  function resetForm() {
+  function resetTaskForm() {
     setTitle("");
     setDescription("");
     setPriority("normal");
     setDueDate("");
+    setEditingTask(null);
   }
 
-  function closeModal() {
-    resetForm();
-    setIsModalOpen(false);
+  function openCreateTaskModal() {
+    resetTaskForm();
+    setIsTaskModalOpen(true);
   }
 
-  async function handleCreateTask(
+  function openEditTaskModal(task: Task) {
+    setEditingTask(task);
+    setTitle(task.title);
+    setDescription(task.description);
+    setPriority(task.priority);
+    setDueDate(task.dueDate);
+    setIsTaskModalOpen(true);
+  }
+
+  function closeTaskModal() {
+    if (isSavingTask) {
+      return;
+    }
+
+    resetTaskForm();
+    setIsTaskModalOpen(false);
+  }
+
+  async function handleSaveTask(
     event: React.FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault();
@@ -486,36 +579,75 @@ function App() {
       return;
     }
 
+    setIsSavingTask(true);
     setErrorMessage(null);
 
-    const { data, error } = await supabase
-      .from("tasks")
-      .insert({
-        title: trimmedTitle,
-        description: description.trim() || null,
-        status: "todo",
-        priority,
-        due_date: dueDate || null,
-        user_id: userId,
-      })
-      .select()
-      .single();
+    if (editingTask) {
+      const { data, error } = await supabase
+        .from("tasks")
+        .update({
+          title: trimmedTitle,
+          description: description.trim() || null,
+          priority,
+          due_date: dueDate || null,
+        })
+        .eq("id", editingTask.id)
+        .select()
+        .single();
 
-    if (error) {
-      setErrorMessage(error.message);
-      return;
+      if (error) {
+        setErrorMessage(
+          "The task could not be updated. Please try again.",
+        );
+        setIsSavingTask(false);
+        return;
+      }
+
+      const updatedTask = mapDatabaseTask(
+        data as DatabaseTask,
+      );
+
+      setTasks((currentTasks) =>
+        currentTasks.map((task) =>
+          task.id === updatedTask.id ? updatedTask : task,
+        ),
+      );
+
+      if (selectedTask?.id === updatedTask.id) {
+        setSelectedTask(updatedTask);
+      }
+    } else {
+      const { data, error } = await supabase
+        .from("tasks")
+        .insert({
+          title: trimmedTitle,
+          description: description.trim() || null,
+          status: "todo",
+          priority,
+          due_date: dueDate || null,
+          user_id: userId,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        setErrorMessage(error.message);
+        setIsSavingTask(false);
+        return;
+      }
+
+      const newTask = mapDatabaseTask(
+        data as DatabaseTask,
+      );
+
+      setTasks((currentTasks) => [
+        newTask,
+        ...currentTasks,
+      ]);
     }
 
-    const newTask = mapDatabaseTask(
-      data as DatabaseTask,
-    );
-
-    setTasks((currentTasks) => [
-      newTask,
-      ...currentTasks,
-    ]);
-
-    closeModal();
+    setIsSavingTask(false);
+    closeTaskModal();
   }
 
   async function handleDeleteTask(task: Task) {
@@ -560,11 +692,97 @@ function App() {
       ),
     );
 
+    if (selectedTask?.id === task.id) {
+      setSelectedTask(null);
+      setComments([]);
+    }
+
     setDeletingTaskIds((currentIds) => {
       const updatedIds = new Set(currentIds);
       updatedIds.delete(task.id);
       return updatedIds;
     });
+  }
+
+  async function openComments(task: Task) {
+    setSelectedTask(task);
+    setComments([]);
+    setCommentBody("");
+    setIsLoadingComments(true);
+    setErrorMessage(null);
+
+    const { data, error } = await supabase
+      .from("comments")
+      .select("*")
+      .eq("task_id", task.id)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      setErrorMessage(
+        "Comments could not be loaded. Please try again.",
+      );
+      setIsLoadingComments(false);
+      return;
+    }
+
+    setComments(
+      (data as DatabaseComment[]).map(mapDatabaseComment),
+    );
+    setIsLoadingComments(false);
+  }
+
+  function closeComments() {
+    if (isSavingComment) {
+      return;
+    }
+
+    setSelectedTask(null);
+    setComments([]);
+    setCommentBody("");
+  }
+
+  async function handleAddComment(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    const trimmedBody = commentBody.trim();
+
+    if (!trimmedBody || !selectedTask || !userId) {
+      return;
+    }
+
+    setIsSavingComment(true);
+    setErrorMessage(null);
+
+    const { data, error } = await supabase
+      .from("comments")
+      .insert({
+        task_id: selectedTask.id,
+        user_id: userId,
+        body: trimmedBody,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      setErrorMessage(
+        "The comment could not be added. Please try again.",
+      );
+      setIsSavingComment(false);
+      return;
+    }
+
+    const newComment = mapDatabaseComment(
+      data as DatabaseComment,
+    );
+
+    setComments((currentComments) => [
+      ...currentComments,
+      newComment,
+    ]);
+    setCommentBody("");
+    setIsSavingComment(false);
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -611,9 +829,9 @@ function App() {
       currentTasks.map((task) =>
         task.id === active.id
           ? {
-            ...task,
-            status: destinationStatus,
-          }
+              ...task,
+              status: destinationStatus,
+            }
           : task,
       ),
     );
@@ -630,9 +848,9 @@ function App() {
         currentTasks.map((task) =>
           task.id === active.id
             ? {
-              ...task,
-              status: previousStatus,
-            }
+                ...task,
+                status: previousStatus,
+              }
             : task,
         ),
       );
@@ -651,12 +869,8 @@ function App() {
     <main className="app">
       <header className="app-header">
         <div>
-          <p className="eyebrow">
-            PROJECT WORKSPACE
-          </p>
-
+          <p className="eyebrow">PROJECT WORKSPACE</p>
           <h1>Product Launch</h1>
-
           <p className="subtitle">
             Plan, track, and complete your team's work.
           </p>
@@ -664,7 +878,7 @@ function App() {
 
         <button
           className="new-task-button"
-          onClick={() => setIsModalOpen(true)}
+          onClick={openCreateTaskModal}
         >
           + New task
         </button>
@@ -700,7 +914,6 @@ function App() {
                 <p>Total tasks</p>
                 <strong>{boardStats.total}</strong>
               </div>
-
               <span className="stat-icon">▦</span>
             </article>
 
@@ -709,7 +922,6 @@ function App() {
                 <p>In progress</p>
                 <strong>{boardStats.inProgress}</strong>
               </div>
-
               <span className="stat-icon">◷</span>
             </article>
 
@@ -718,21 +930,20 @@ function App() {
                 <p>Completed</p>
                 <strong>{boardStats.completed}</strong>
               </div>
-
               <span className="stat-icon">✓</span>
             </article>
 
             <article
-              className={`stat-card ${boardStats.overdue > 0
+              className={`stat-card ${
+                boardStats.overdue > 0
                   ? "stat-card-warning"
                   : ""
-                }`}
+              }`}
             >
               <div>
                 <p>Overdue</p>
                 <strong>{boardStats.overdue}</strong>
               </div>
-
               <span className="stat-icon">!</span>
             </article>
 
@@ -812,8 +1023,8 @@ function App() {
                 onChange={(event) =>
                   setPriorityFilter(
                     event.target.value as
-                    | Priority
-                    | "all",
+                      | Priority
+                      | "all",
                   )
                 }
               >
@@ -860,6 +1071,8 @@ function App() {
                   tasks={tasksByColumn[column.key]}
                   isFiltering={isFiltering}
                   onDeleteTask={handleDeleteTask}
+                  onEditTask={openEditTaskModal}
+                  onOpenComments={openComments}
                   deletingTaskIds={deletingTaskIds}
                 />
               ))}
@@ -867,26 +1080,23 @@ function App() {
 
             <DragOverlay>
               {activeTask ? (
-                <TaskCard
-                  task={activeTask}
-                  isOverlay
-                />
+                <TaskCard task={activeTask} isOverlay />
               ) : null}
             </DragOverlay>
           </DndContext>
         </>
       )}
 
-      {isModalOpen && (
+      {isTaskModalOpen && (
         <div
           className="modal-backdrop"
-          onMouseDown={closeModal}
+          onMouseDown={closeTaskModal}
         >
           <section
             className="task-modal"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="new-task-title"
+            aria-labelledby="task-modal-title"
             onMouseDown={(event) =>
               event.stopPropagation()
             }
@@ -894,11 +1104,13 @@ function App() {
             <div className="modal-header">
               <div>
                 <p className="modal-eyebrow">
-                  NEW TASK
+                  {editingTask ? "EDIT TASK" : "NEW TASK"}
                 </p>
 
-                <h2 id="new-task-title">
-                  Add work to your board
+                <h2 id="task-modal-title">
+                  {editingTask
+                    ? "Update task details"
+                    : "Add work to your board"}
                 </h2>
               </div>
 
@@ -906,16 +1118,16 @@ function App() {
                 type="button"
                 className="close-button"
                 aria-label="Close task form"
-                onClick={closeModal}
+                onClick={closeTaskModal}
+                disabled={isSavingTask}
               >
                 ×
               </button>
             </div>
 
-            <form onSubmit={handleCreateTask}>
+            <form onSubmit={handleSaveTask}>
               <label>
                 Task title
-
                 <input
                   type="text"
                   value={title}
@@ -930,7 +1142,6 @@ function App() {
 
               <label>
                 Description
-
                 <textarea
                   value={description}
                   onChange={(event) =>
@@ -944,7 +1155,6 @@ function App() {
               <div className="form-row">
                 <label>
                   Priority
-
                   <select
                     value={priority}
                     onChange={(event) =>
@@ -963,7 +1173,6 @@ function App() {
 
                 <label>
                   Due date
-
                   <input
                     type="date"
                     value={dueDate}
@@ -978,7 +1187,8 @@ function App() {
                 <button
                   type="button"
                   className="secondary-button"
-                  onClick={closeModal}
+                  onClick={closeTaskModal}
+                  disabled={isSavingTask}
                 >
                   Cancel
                 </button>
@@ -986,8 +1196,120 @@ function App() {
                 <button
                   type="submit"
                   className="primary-button"
+                  disabled={isSavingTask}
                 >
-                  Create task
+                  {isSavingTask
+                    ? "Saving..."
+                    : editingTask
+                      ? "Save changes"
+                      : "Create task"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {selectedTask && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={closeComments}
+        >
+          <section
+            className="comments-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="comments-modal-title"
+            onMouseDown={(event) =>
+              event.stopPropagation()
+            }
+          >
+            <div className="modal-header">
+              <div>
+                <p className="modal-eyebrow">
+                  TASK DISCUSSION
+                </p>
+                <h2 id="comments-modal-title">
+                  {selectedTask.title}
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                className="close-button"
+                aria-label="Close comments"
+                onClick={closeComments}
+                disabled={isSavingComment}
+              >
+                ×
+              </button>
+            </div>
+
+            {selectedTask.description && (
+              <p className="comments-task-description">
+                {selectedTask.description}
+              </p>
+            )}
+
+            <div className="comments-list">
+              {isLoadingComments ? (
+                <div className="comments-empty">
+                  Loading comments...
+                </div>
+              ) : comments.length === 0 ? (
+                <div className="comments-empty">
+                  No comments yet. Start the discussion.
+                </div>
+              ) : (
+                comments.map((comment) => (
+                  <article
+                    className="comment-item"
+                    key={comment.id}
+                  >
+                    <p>{comment.body}</p>
+                    <time dateTime={comment.createdAt}>
+                      {new Date(
+                        comment.createdAt,
+                      ).toLocaleString()}
+                    </time>
+                  </article>
+                ))
+              )}
+            </div>
+
+            <form
+              className="comment-form"
+              onSubmit={handleAddComment}
+            >
+              <label>
+                Add a comment
+                <textarea
+                  value={commentBody}
+                  onChange={(event) =>
+                    setCommentBody(event.target.value)
+                  }
+                  placeholder="Share an update or ask a question..."
+                  rows={3}
+                  maxLength={1000}
+                />
+              </label>
+
+              <div className="comment-form-footer">
+                <span>
+                  {commentBody.length}/1000
+                </span>
+
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={
+                    isSavingComment ||
+                    commentBody.trim() === ""
+                  }
+                >
+                  {isSavingComment
+                    ? "Posting..."
+                    : "Post comment"}
                 </button>
               </div>
             </form>
