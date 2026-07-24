@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "./lib/supabase";
 import {
   DndContext,
   DragOverlay,
@@ -9,12 +8,11 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-
 import type {
   DragEndEvent,
   DragStartEvent,
 } from "@dnd-kit/core";
-
+import { supabase } from "./lib/supabase";
 import "./App.css";
 
 type TaskStatus = "todo" | "in_progress" | "in_review" | "done";
@@ -130,9 +128,13 @@ function getDueDateStatus(task: Task) {
 function TaskCard({
   task,
   isOverlay = false,
+  onDelete,
+  isDeleting = false,
 }: {
   task: Task;
   isOverlay?: boolean;
+  onDelete?: (task: Task) => void;
+  isDeleting?: boolean;
 }) {
   const {
     attributes,
@@ -146,7 +148,7 @@ function TaskCard({
       type: "task",
       task,
     },
-    disabled: isOverlay,
+    disabled: isOverlay || isDeleting,
   });
 
   const style =
@@ -163,20 +165,40 @@ function TaskCard({
       ref={setNodeRef}
       style={style}
       className={`task-card ${isDragging ? "task-card-dragging" : ""
-        } ${isOverlay ? "task-card-overlay" : ""}`}
-      {...attributes}
-      {...listeners}
+        } ${isOverlay ? "task-card-overlay" : ""} ${isDeleting ? "task-card-deleting" : ""
+        }`}
     >
       <div className="task-card-top">
-        <span
-          className={`priority-badge priority-${task.priority}`}
-        >
+        <span className={`priority-badge priority-${task.priority}`}>
           {task.priority}
         </span>
 
-        <span className="drag-handle" aria-hidden="true">
-          ⠿
-        </span>
+        <div className="task-card-actions">
+          {!isOverlay && onDelete && (
+            <button
+              type="button"
+              className="delete-task-button"
+              disabled={isDeleting}
+              onClick={() => onDelete(task)}
+              aria-label={`Delete ${task.title}`}
+              title="Delete task"
+            >
+              {isDeleting ? "…" : "×"}
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="drag-handle"
+            disabled={isDeleting}
+            aria-label={`Drag ${task.title}`}
+            title="Drag task"
+            {...attributes}
+            {...listeners}
+          >
+            ⠿
+          </button>
+        </div>
       </div>
 
       <h3>{task.title}</h3>
@@ -205,10 +227,14 @@ function BoardColumn({
   column,
   tasks,
   isFiltering,
+  onDeleteTask,
+  deletingTaskIds,
 }: {
   column: ColumnDefinition;
   tasks: Task[];
   isFiltering: boolean;
+  onDeleteTask: (task: Task) => void;
+  deletingTaskIds: Set<string>;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.key,
@@ -245,7 +271,12 @@ function BoardColumn({
           </div>
         ) : (
           tasks.map((task) => (
-            <TaskCard task={task} key={task.id} />
+            <TaskCard
+              key={task.id}
+              task={task}
+              onDelete={onDeleteTask}
+              isDeleting={deletingTaskIds.has(task.id)}
+            />
           ))
         )}
       </div>
@@ -269,20 +300,19 @@ function App() {
   const [userId, setUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [activeTask, setActiveTask] =
-    useState<Task | null>(null);
+  const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [priority, setPriority] =
-    useState<Priority>("normal");
+  const [priority, setPriority] = useState<Priority>("normal");
   const [dueDate, setDueDate] = useState("");
+  const [deletingTaskIds, setDeletingTaskIds] =
+    useState<Set<string>>(new Set());
 
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] =
     useState<Priority | "all">("all");
-
 
   useEffect(() => {
     async function initializeApp() {
@@ -488,6 +518,55 @@ function App() {
     closeModal();
   }
 
+  async function handleDeleteTask(task: Task) {
+    const confirmed = window.confirm(
+      `Delete "${task.title}"? This action cannot be undone.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setErrorMessage(null);
+
+    setDeletingTaskIds((currentIds) => {
+      const updatedIds = new Set(currentIds);
+      updatedIds.add(task.id);
+      return updatedIds;
+    });
+
+    const { error } = await supabase
+      .from("tasks")
+      .delete()
+      .eq("id", task.id);
+
+    if (error) {
+      setErrorMessage(
+        "The task could not be deleted. Please try again.",
+      );
+
+      setDeletingTaskIds((currentIds) => {
+        const updatedIds = new Set(currentIds);
+        updatedIds.delete(task.id);
+        return updatedIds;
+      });
+
+      return;
+    }
+
+    setTasks((currentTasks) =>
+      currentTasks.filter(
+        (currentTask) => currentTask.id !== task.id,
+      ),
+    );
+
+    setDeletingTaskIds((currentIds) => {
+      const updatedIds = new Set(currentIds);
+      updatedIds.delete(task.id);
+      return updatedIds;
+    });
+  }
+
   function handleDragStart(event: DragStartEvent) {
     const draggedTask = tasks.find(
       (task) => task.id === event.active.id,
@@ -592,211 +671,211 @@ function App() {
       </header>
 
       {errorMessage && (
-  <div className="error-banner" role="alert">
-    <span>{errorMessage}</span>
+        <div className="error-banner" role="alert">
+          <span>{errorMessage}</span>
 
-    <button
-      type="button"
-      onClick={() => setErrorMessage(null)}
-      aria-label="Dismiss error"
-    >
-      ×
-    </button>
-  </div>
-)}
-
-{isLoading ? (
-  <section className="loading-state">
-    <div className="loading-spinner" />
-    <p>Preparing your workspace...</p>
-  </section>
-) : (
-  <>
-
-      <section
-        className="stats-grid"
-        aria-label="Board summary"
-      >
-        <article className="stat-card">
-          <div>
-            <p>Total tasks</p>
-            <strong>{boardStats.total}</strong>
-          </div>
-
-          <span className="stat-icon">▦</span>
-        </article>
-
-        <article className="stat-card">
-          <div>
-            <p>In progress</p>
-            <strong>{boardStats.inProgress}</strong>
-          </div>
-
-          <span className="stat-icon">◷</span>
-        </article>
-
-        <article className="stat-card">
-          <div>
-            <p>Completed</p>
-            <strong>{boardStats.completed}</strong>
-          </div>
-
-          <span className="stat-icon">✓</span>
-        </article>
-
-        <article
-          className={`stat-card ${boardStats.overdue > 0
-            ? "stat-card-warning"
-            : ""
-            }`}
-        >
-          <div>
-            <p>Overdue</p>
-            <strong>{boardStats.overdue}</strong>
-          </div>
-
-          <span className="stat-icon">!</span>
-        </article>
-
-        <article className="progress-card">
-          <div className="progress-header">
-            <div>
-              <p>Project progress</p>
-              <strong>
-                {boardStats.completionPercentage}%
-              </strong>
-            </div>
-
-            <span>
-              {boardStats.completed} of{" "}
-              {boardStats.total} completed
-            </span>
-          </div>
-
-          <div
-            className="progress-track"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={
-              boardStats.completionPercentage
-            }
-          >
-            <div
-              className="progress-fill"
-              style={{
-                width: `${boardStats.completionPercentage}%`,
-              }}
-            />
-          </div>
-        </article>
-      </section>
-
-      <section
-        className="board-toolbar"
-        aria-label="Task filters"
-      >
-        <div className="search-field">
-          <span
-            className="search-icon"
-            aria-hidden="true"
-          >
-            ⌕
-          </span>
-
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(event) =>
-              setSearchQuery(event.target.value)
-            }
-            placeholder="Search tasks..."
-            aria-label="Search tasks"
-          />
-
-          {searchQuery && (
-            <button
-              type="button"
-              className="clear-search-button"
-              onClick={() => setSearchQuery("")}
-              aria-label="Clear task search"
-            >
-              ×
-            </button>
-          )}
-        </div>
-
-        <label className="filter-field">
-          <span>Priority</span>
-
-          <select
-            value={priorityFilter}
-            onChange={(event) =>
-              setPriorityFilter(
-                event.target.value as
-                | Priority
-                | "all",
-              )
-            }
-          >
-            <option value="all">
-              All priorities
-            </option>
-            <option value="high">High</option>
-            <option value="normal">Normal</option>
-            <option value="low">Low</option>
-          </select>
-        </label>
-
-        <div className="filter-results">
-          Showing{" "}
-          <strong>{filteredTasks.length}</strong> of{" "}
-          <strong>{tasks.length}</strong> tasks
-        </div>
-
-        {isFiltering && (
           <button
             type="button"
-            className="reset-filters-button"
-            onClick={() => {
-              setSearchQuery("");
-              setPriorityFilter("all");
-            }}
+            onClick={() => setErrorMessage(null)}
+            aria-label="Dismiss error"
           >
-            Reset filters
+            ×
           </button>
-        )}
-      </section>
+        </div>
+      )}
 
-      <DndContext
-        sensors={sensors}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-        onDragCancel={() => setActiveTask(null)}
-      >
-        <section className="board">
-          {columns.map((column) => (
-            <BoardColumn
-              key={column.key}
-              column={column}
-              tasks={tasksByColumn[column.key]}
-              isFiltering={isFiltering}
-            />
-          ))}
+      {isLoading ? (
+        <section className="loading-state">
+          <div className="loading-spinner" />
+          <p>Preparing your workspace...</p>
         </section>
+      ) : (
+        <>
+          <section
+            className="stats-grid"
+            aria-label="Board summary"
+          >
+            <article className="stat-card">
+              <div>
+                <p>Total tasks</p>
+                <strong>{boardStats.total}</strong>
+              </div>
 
-        <DragOverlay>
-          {activeTask ? (
-            <TaskCard
-              task={activeTask}
-              isOverlay
-            />
-          ) : null}
-        </DragOverlay>
-      </DndContext>
+              <span className="stat-icon">▦</span>
+            </article>
 
+            <article className="stat-card">
+              <div>
+                <p>In progress</p>
+                <strong>{boardStats.inProgress}</strong>
+              </div>
+
+              <span className="stat-icon">◷</span>
+            </article>
+
+            <article className="stat-card">
+              <div>
+                <p>Completed</p>
+                <strong>{boardStats.completed}</strong>
+              </div>
+
+              <span className="stat-icon">✓</span>
+            </article>
+
+            <article
+              className={`stat-card ${boardStats.overdue > 0
+                  ? "stat-card-warning"
+                  : ""
+                }`}
+            >
+              <div>
+                <p>Overdue</p>
+                <strong>{boardStats.overdue}</strong>
+              </div>
+
+              <span className="stat-icon">!</span>
+            </article>
+
+            <article className="progress-card">
+              <div className="progress-header">
+                <div>
+                  <p>Project progress</p>
+                  <strong>
+                    {boardStats.completionPercentage}%
+                  </strong>
+                </div>
+
+                <span>
+                  {boardStats.completed} of{" "}
+                  {boardStats.total} completed
+                </span>
+              </div>
+
+              <div
+                className="progress-track"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={
+                  boardStats.completionPercentage
+                }
+              >
+                <div
+                  className="progress-fill"
+                  style={{
+                    width: `${boardStats.completionPercentage}%`,
+                  }}
+                />
+              </div>
+            </article>
+          </section>
+
+          <section
+            className="board-toolbar"
+            aria-label="Task filters"
+          >
+            <div className="search-field">
+              <span
+                className="search-icon"
+                aria-hidden="true"
+              >
+                ⌕
+              </span>
+
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(event) =>
+                  setSearchQuery(event.target.value)
+                }
+                placeholder="Search tasks..."
+                aria-label="Search tasks"
+              />
+
+              {searchQuery && (
+                <button
+                  type="button"
+                  className="clear-search-button"
+                  onClick={() => setSearchQuery("")}
+                  aria-label="Clear task search"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
+            <label className="filter-field">
+              <span>Priority</span>
+
+              <select
+                value={priorityFilter}
+                onChange={(event) =>
+                  setPriorityFilter(
+                    event.target.value as
+                    | Priority
+                    | "all",
+                  )
+                }
+              >
+                <option value="all">
+                  All priorities
+                </option>
+                <option value="high">High</option>
+                <option value="normal">Normal</option>
+                <option value="low">Low</option>
+              </select>
+            </label>
+
+            <div className="filter-results">
+              Showing{" "}
+              <strong>{filteredTasks.length}</strong> of{" "}
+              <strong>{tasks.length}</strong> tasks
+            </div>
+
+            {isFiltering && (
+              <button
+                type="button"
+                className="reset-filters-button"
+                onClick={() => {
+                  setSearchQuery("");
+                  setPriorityFilter("all");
+                }}
+              >
+                Reset filters
+              </button>
+            )}
+          </section>
+
+          <DndContext
+            sensors={sensors}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            onDragCancel={() => setActiveTask(null)}
+          >
+            <section className="board">
+              {columns.map((column) => (
+                <BoardColumn
+                  key={column.key}
+                  column={column}
+                  tasks={tasksByColumn[column.key]}
+                  isFiltering={isFiltering}
+                  onDeleteTask={handleDeleteTask}
+                  deletingTaskIds={deletingTaskIds}
+                />
+              ))}
+            </section>
+
+            <DragOverlay>
+              {activeTask ? (
+                <TaskCard
+                  task={activeTask}
+                  isOverlay
+                />
+              ) : null}
+            </DragOverlay>
+          </DndContext>
         </>
-)}
+      )}
 
       {isModalOpen && (
         <div
@@ -855,9 +934,7 @@ function App() {
                 <textarea
                   value={description}
                   onChange={(event) =>
-                    setDescription(
-                      event.target.value,
-                    )
+                    setDescription(event.target.value)
                   }
                   placeholder="Add useful details..."
                   rows={4}
@@ -872,20 +949,15 @@ function App() {
                     value={priority}
                     onChange={(event) =>
                       setPriority(
-                        event.target
-                          .value as Priority,
+                        event.target.value as Priority,
                       )
                     }
                   >
-                    <option value="low">
-                      Low
-                    </option>
+                    <option value="low">Low</option>
                     <option value="normal">
                       Normal
                     </option>
-                    <option value="high">
-                      High
-                    </option>
+                    <option value="high">High</option>
                   </select>
                 </label>
 
@@ -896,9 +968,7 @@ function App() {
                     type="date"
                     value={dueDate}
                     onChange={(event) =>
-                      setDueDate(
-                        event.target.value,
-                      )
+                      setDueDate(event.target.value)
                     }
                   />
                 </label>

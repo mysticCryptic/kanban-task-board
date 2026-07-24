@@ -366,15 +366,6 @@ select {
   }
 }
 
-.task-card {
-  cursor: grab;
-  touch-action: none;
-}
-
-.task-card:active {
-  cursor: grabbing;
-}
-
 .task-card-dragging {
   opacity: 0.35;
 }
@@ -766,4 +757,61 @@ select {
   to {
     transform: rotate(360deg);
   }
+}
+
+.task-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.drag-handle,
+.delete-task-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.drag-handle {
+  background: transparent;
+  color: #a2a4af;
+  font-size: 1rem;
+  touch-action: none;
+  cursor: grab;
+}
+
+.drag-handle:hover {
+  background: #f0eff7;
+  color: #6254e7;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.delete-task-button {
+  background: transparent;
+  color: #a3a5af;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.delete-task-button:hover {
+  background: #ffebe8;
+  color: #c23e34;
+}
+
+.drag-handle:disabled,
+.delete-task-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.task-card-deleting {
+  opacity: 0.55;
+  pointer-events: none;
 }
